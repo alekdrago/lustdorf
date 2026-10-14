@@ -86,6 +86,20 @@ label.pbtn input{position:absolute;inset:0;opacity:0;font-size:200px;cursor:poin
 .badge{font-family:var(--f-num);font-size:11px;padding:2px 6px;border-radius:4px;background:var(--chip)}
 #toast{position:absolute;left:50%;transform:translateX(-50%);top:46px;background:var(--ink);color:var(--paper);padding:6px 12px;border-radius:6px;font-size:13px;z-index:9;pointer-events:none}
 @media (prefers-reduced-motion:no-preference){#panel{animation:up .16s ease-out}@keyframes up{from{transform:translateY(16px);opacity:.6}}}
+@media (orientation:landscape) and (max-height:560px){
+  #app{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto 1fr;grid-template-areas:"h h" "s t"}
+  header{grid-area:h;padding-top:3px;padding-bottom:3px;flex-wrap:nowrap}
+  header .hbtn{padding:4px 9px}
+  #sheet{padding:4px 8px}
+  #stage{grid-area:s}
+  #tools{grid-area:t;flex-direction:column;overflow-x:hidden;overflow-y:auto;border-top:0;border-left:1px solid var(--line);
+    padding:6px calc(6px + env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) 6px;gap:5px}
+  .tool{flex:1 1 0;min-width:64px;min-height:0;padding:3px 6px;font-size:11px}
+  .tool svg{width:20px;height:20px}
+  #hint{display:none}
+  #panel{left:auto;top:0;width:min(400px,62%);max-height:none;border-top:0;border-left:2px solid var(--accent);box-shadow:-8px 0 24px rgba(0,0,0,.18)}
+  #toast{top:8px}
+}
 </style></head><body>
 
 <div id="app">
@@ -424,11 +438,68 @@ async function exportAll(){
     toast('Не вдалося надіслати. Збережіть у Завантаження і прикріпіть файл у Telegram (скріпка → Файл).');
   };
   r.appendChild(sb);
+  const tb=Object.assign(document.createElement('button'),{type:'button',className:'pbtn',textContent:'✈ У Telegram (одразу)'});
+  tb.onclick=()=>tgSend(files,fname,`Люстдорф · ${marks.filter(m=>!m.deleted).length} позн. · ${photos.length} фото`,P);
+  r.insertBefore(tb,r.firstChild);
   const c=Object.assign(document.createElement('button'),{type:'button',className:'pbtn sec',textContent:'Закрити'}); c.onclick=closePanel; r.appendChild(c);
   P.appendChild(r);
   const n=document.createElement('div'); n.className='note'; n.textContent='Дані залишаються на пристрої і після експорту. Архів можна робити скільки завгодно разів — кожен містить усе.'; P.appendChild(n);
 }
 $('#btnExport').onclick=exportAll;
+
+/* ---------- Telegram: direct send via own bot ---------- */
+const TG='https://api.telegram.org/bot';
+async function tgApi(tok,method,body){ const r=await fetch(TG+tok+'/'+method,{method:'POST',body}); const j=await r.json().catch(()=>({ok:false,description:'HTTP '+r.status})); if(!j.ok) throw new Error(j.description||'помилка'); return j.result; }
+function tgStatus(P,t){ let x=P.querySelector('.tgst'); if(!x){x=document.createElement('div');x.className='note tgst';x.style.fontWeight='600';P.appendChild(x)} x.textContent=t; }
+async function tgSetup(P){
+  return new Promise(res=>{
+    const cur={};
+    const box=document.createElement('div'); box.className='tgbox';
+    box.innerHTML=`<h3>Налаштування Telegram (один раз)</h3>
+<div class="note" style="line-height:1.5">1) У Telegram відкрийте <b>@BotFather</b> → <b>/newbot</b> → придумайте ім’я (напр. Lustdorf Field) і логін, що закінчується на <b>bot</b>.<br>
+2) BotFather надішле <b>токен</b> (вигляд 123456789:AA…). Скопіюйте його сюди.<br>
+3) Відкрийте свого нового бота і натисніть <b>Start</b> (або напишіть йому будь-що).<br>
+4) Натисніть «Підключити».</div>
+<input class="tgtok" placeholder="токен від BotFather" style="width:100%;font-size:16px;padding:10px;margin:8px 0;box-sizing:border-box" autocomplete="off" autocapitalize="off" spellcheck="false">
+<div class="row"><button type="button" class="pbtn tgok">Підключити</button><button type="button" class="pbtn sec tgno">Скасувати</button></div>`;
+    P.appendChild(box); P.scrollTop=P.scrollHeight;
+    box.querySelector('.tgno').onclick=()=>{box.remove();res(null)};
+    box.querySelector('.tgok').onclick=async()=>{
+      const tok=box.querySelector('.tgtok').value.trim().replace(/\s/g,'');
+      if(!/^\d+:[\w-]{20,}$/.test(tok)){toast('Схоже, це не токен — скопіюйте повністю');return}
+      try{ tgStatus(P,'Перевіряю…'); const me=await tgApi(tok,'getMe');
+        const up=await tgApi(tok,'getUpdates');
+        const msg=[...up].reverse().map(u=>u.message||u.edited_message||u.my_chat_member).find(m=>m&&m.chat);
+        if(!msg){ tgStatus(P,`Бот @${me.username} знайдено, але ви ще не написали йому. Відкрийте @${me.username} у Telegram, натисніть Start і знову «Підключити».`); return; }
+        const cfg={tok,chat:msg.chat.id,bot:me.username}; await kvSet('tg',cfg);
+        await tgApi(tok,'sendMessage',new URLSearchParams({chat_id:cfg.chat,text:'✅ Застосунок «Люстдорф» підключено. Архіви приходитимуть сюди.'}));
+        box.remove(); tgStatus(P,'Підключено: @'+me.username); res(cfg);
+      }catch(e){ tgStatus(P,'Помилка: '+e.message+'. Перевірте токен та інтернет.'); }
+    };
+  });
+}
+async function tgSend(files,fname,caption,P){
+  let cfg=await kvGet('tg');
+  if(!cfg){ cfg=await tgSetup(P); if(!cfg) return; }
+  // split into parts ≤ 45 MB (Telegram bot limit 50 MB)
+  const LIM=45*1048576, head=files[0], rest=files.slice(1); const parts=[]; let cur=[], sz=0;
+  for(const f of rest){ if(cur.length&&sz+f.data.length>LIM){parts.push(cur);cur=[];sz=0} cur.push(f); sz+=f.data.length; }
+  parts.push(cur);
+  const n=parts.length;
+  try{
+    for(let i=0;i<n;i++){
+      tgStatus(P,`Надсилаю в Telegram${n>1?` частину ${i+1} з ${n}`:''}… не закривайте застосунок`);
+      const zip=await makeZip([head,...parts[i]]);
+      const nm=n>1?fname.replace('.zip',`_ч${i+1}з${n}.zip`):fname;
+      const fd=new FormData(); fd.append('chat_id',cfg.chat); fd.append('caption',caption+(n>1?` · частина ${i+1}/${n}`:'')); fd.append('document',new File([zip],nm,{type:'application/zip'}));
+      await tgApi(cfg.tok,'sendDocument',fd);
+    }
+    tgStatus(P,`✅ Надіслано в Telegram (@${cfg.bot})${n>1?`, ${n} частини`:''}.`); toast('Надіслано в Telegram');
+  }catch(e){
+    tgStatus(P,'Не вдалося: '+e.message+'. Перевірте інтернет і спробуйте ще раз.');
+    if(/unauthorized|chat not found|blocked/i.test(e.message)){ await kvSet('tg',null); tgStatus(P,'Бот недоступний ('+e.message+'). Натисніть кнопку ще раз і підключіть бота заново.'); }
+  }
+}
 
 /* ---------- visits (entry / exit per sheet) ---------- */
 let visit=null;
