@@ -411,7 +411,19 @@ async function exportAll(){
   const h=document.createElement('h3'); h.textContent=`Архів готовий: ${marks.filter(m=>!m.deleted).length} позначок, ${photos.length} фото, ${(zip.size/1048576).toFixed(1)} МБ`; P.appendChild(h);
   const r=document.createElement('div'); r.className='row';
   const a=document.createElement('a'); a.className='pbtn'; a.textContent='Зберегти в Завантаження'; a.href=URL.createObjectURL(zip); a.download=fname; r.appendChild(a);
-  if(navigator.canShare&&navigator.canShare({files:[file]})){ const sb=Object.assign(document.createElement('button'),{type:'button',className:'pbtn sec',textContent:'Надіслати (Telegram, Drive…)'}); sb.onclick=()=>navigator.share({files:[file],title:fname}).catch(()=>{}); r.appendChild(sb); }
+  const jsonTxt=new File([files[0].data],fname.replace('.zip','')+'_marks.txt',{type:'text/plain'});
+  const jpgs=photos.map((p,i)=>new File([p.blob],meta[i].file.split('/').pop(),{type:'image/jpeg'}));
+  const sb=Object.assign(document.createElement('button'),{type:'button',className:'pbtn sec',textContent:'Надіслати (Telegram, Drive…)'});
+  sb.onclick=async()=>{
+    if(!navigator.share){toast('Надсилання не підтримується — збережіть у Завантаження');return}
+    const tries=[[file],[jsonTxt,...jpgs]];
+    for(const fl of tries){
+      try{ if(navigator.canShare&&!navigator.canShare({files:fl}))continue; await navigator.share({files:fl,title:fname}); return; }
+      catch(e){ if(e&&e.name==='AbortError')return; }
+    }
+    toast('Не вдалося надіслати. Збережіть у Завантаження і прикріпіть файл у Telegram (скріпка → Файл).');
+  };
+  r.appendChild(sb);
   const c=Object.assign(document.createElement('button'),{type:'button',className:'pbtn sec',textContent:'Закрити'}); c.onclick=closePanel; r.appendChild(c);
   P.appendChild(r);
   const n=document.createElement('div'); n.className='note'; n.textContent='Дані залишаються на пристрої і після експорту. Архів можна робити скільки завгодно разів — кожен містить усе.'; P.appendChild(n);
